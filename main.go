@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"regexp"
@@ -31,41 +32,44 @@ const (
 	ColorGreen  = "12118406"
 )
 
-var regexChatMessage string = `^\[.*\]: \<(.*)\> (.*)`
-var regexJoin string = `^\[.*\]: (.*) joined the game`
-var regexLeft string = `^\[.*\]: (.*) left the game`
-var regexServerStarting string = `^\[.*\]: Starting minecraft server`
-var regexServerStarted string = `^\[.*\]: Done \(.*\)! For help, type "help"`
-var regexServerStop string = `^\[.*\]: Stopping server`
-var regexAdvancement string = `^\[.*\]: (.*) has made the advancement \[(.*)\]`
+var (
+	regexChatMessage    string = `^\[.*\]: \<(.*)\> (.*)`
+	regexJoin           string = `^\[.*\]: (.*) joined the game`
+	regexLeft           string = `^\[.*\]: (.*) left the game`
+	regexServerStarting string = `^\[.*\]: Starting minecraft server`
+	regexServerStarted  string = `^\[.*\]: Done \(.*\)! For help, type "help"`
+	regexServerStop     string = `^\[.*\]: Stopping server`
+	regexAdvancement    string = `^\[.*\]: (.*) has made the advancement \[(.*)\]`
+)
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Missing log file")
-		fmt.Println("Usage: <path/to/logfile> <webhookUrl>")
+		slog.Error("missing log file")
+		slog.Error("usage: <path/to/logfile> <webhookUrl>")
 		return
 	}
 
 	if len(os.Args) < 3 {
-		fmt.Println("Missing webook url")
-		fmt.Println("Usage: <path/to/logfile> <webhookUrl>")
+		slog.Error("missing webook url")
+		slog.Error("usage: <path/to/logfile> <webhookUrl>")
 		return
 	}
 
 	filePath := os.Args[1]
 	webhookUrl := os.Args[2]
+	slog.Info("start reading...", "filePath", filePath)
 	file, err := os.Open(filePath)
 	if err != nil {
-		log.Fatalf("Can't read log file %v \n", filePath)
+		slog.Error("can't read log file", "filePath", filePath)
 		return
 	}
 	defer file.Close()
 
-	fmt.Println("Start")
+	slog.Info("start")
 
 	fileInfo, err := file.Stat()
 	if err != nil {
-		fmt.Println("Error getting file info:", err)
+		slog.Error("error getting file info", "error", err)
 		return
 	}
 
@@ -75,9 +79,10 @@ func main() {
 	// Read from last line
 	fileSize := fileInfo.Size()
 	file.Seek(fileSize, io.SeekStart)
-
+	slog.Debug("file info", "fileSize", fileSize)
 	reader := bufio.NewReader(file)
 
+	slog.Debug("start loop")
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -97,7 +102,7 @@ func main() {
 				}
 				continue
 			} else {
-				log.Printf("Error %v\n", err)
+				slog.Error("unknown error cannot read file", "error", err)
 			}
 
 			break
@@ -109,9 +114,9 @@ func main() {
 				logChannels <- line
 			}()
 		}
-		fmt.Printf("%s\n", string(line))
+		slog.Info("log", "message", string(line))
 	}
-	fmt.Println("End")
+	slog.Info("stopped")
 }
 
 func isTruncated(file *os.File) (bool, error) {
@@ -181,10 +186,12 @@ func parseChatMessage(msg string) []string {
 }
 
 func processMessageQueue(webhookUrl string, channel chan string) {
+	slog.Debug("processMessageQueue start")
 	playerJoin := map[string]time.Time{}
 
 	for {
 		message := <-channel
+		slog.Debug("processMessageQueue recieve message", "message", message)
 
 		if regexp.MustCompile(regexServerStarting).MatchString(message) {
 			postWebhook(webhookUrl, Embed{
@@ -240,7 +247,7 @@ func postWebhook(url string, content Embed) {
 	for {
 		resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
 		if err != nil {
-			fmt.Print("Error can't post to webhook")
+			slog.Error("error can't post to webhook")
 		}
 		defer resp.Body.Close()
 
@@ -258,10 +265,10 @@ func postWebhook(url string, content Embed) {
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			fmt.Println("Can't read response body")
+			slog.Error("can't read response body")
 		}
 
-		fmt.Println(string(body))
+		slog.Info("post webhook", "message", string(body))
 		break
 	}
 }
